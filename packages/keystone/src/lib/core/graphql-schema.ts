@@ -4,14 +4,16 @@ import { InitialisedList } from './types-for-lists';
 
 import { getMutationsForList } from './mutations';
 import { getQueriesForList } from './queries';
+import { KeystoneErrors } from './graphql-errors';
 
 export function getGraphQLSchema(
   lists: Record<string, InitialisedList>,
+  errors: KeystoneErrors,
   provider: DatabaseProvider
 ) {
   const query = schema.object()({
     name: 'Query',
-    fields: Object.assign({}, ...Object.values(lists).map(list => getQueriesForList(list))),
+    fields: Object.assign({}, ...Object.values(lists).map(list => getQueriesForList(list, errors))),
   });
 
   const updateManyByList: Record<string, schema.InputObjectType<any>> = {};
@@ -21,7 +23,7 @@ export function getGraphQLSchema(
     fields: Object.assign(
       {},
       ...Object.values(lists).map(list => {
-        const { mutations, updateManyInput } = getMutationsForList(list, provider);
+        const { mutations, updateManyInput } = getMutationsForList(list, errors, provider);
         updateManyByList[list.listKey] = updateManyInput;
         return mutations;
       })

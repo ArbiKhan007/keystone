@@ -12,10 +12,10 @@ import {
 } from '@keystone-next/types';
 import { GraphQLResolveInfo } from 'graphql';
 import { validateFieldAccessControl } from '../access-control';
-import { accessDeniedError } from '../graphql-errors';
 import { ResolvedDBField, ResolvedRelationDBField } from '../resolve-relationships';
 import { InitialisedList } from '../types-for-lists';
 import { IdType, getDBFieldKeyForFieldOnMultiField, runWithPrisma } from '../utils';
+import { KeystoneErrors } from '../graphql-errors';
 import { accessControlledFilter } from './resolvers';
 import * as queries from './resolvers';
 
@@ -24,7 +24,8 @@ function getRelationVal(
   id: IdType,
   foreignList: InitialisedList,
   context: KeystoneContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
+  errors: KeystoneErrors
 ) {
   const oppositeDbField = foreignList.resolvedDbFields[dbField.field];
   if (oppositeDbField.kind !== 'relation') throw new Error('failed assert');
@@ -34,13 +35,18 @@ function getRelationVal(
   if (dbField.mode === 'many') {
     return {
       findMany: async (args: FindManyArgsValue) =>
-        queries.findMany(args, foreignList, context, info, relationFilter),
+        queries.findMany(args, foreignList, context, info, errors, relationFilter),
       count: async ({ where }: { where: TypesForList['where'] }) =>
-        queries.count({ where }, foreignList, context, info, relationFilter),
+        queries.count({ where }, foreignList, context, info, errors, relationFilter),
     };
   } else {
     return async () => {
-      const resolvedWhere = await accessControlledFilter(foreignList, context, relationFilter);
+      const resolvedWhere = await accessControlledFilter(
+        foreignList,
+        context,
+        relationFilter,
+        errors
+      );
 
       return runWithPrisma(context, foreignList, model =>
         model.findFirst({ where: resolvedWhere })
@@ -56,7 +62,8 @@ function getValueForDBField(
   fieldPath: string,
   context: KeystoneContext,
   lists: Record<string, InitialisedList>,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
+  errors: KeystoneErrors
 ) {
   if (dbField.kind === 'multi') {
     return Object.fromEntries(
@@ -67,7 +74,7 @@ function getValueForDBField(
     );
   }
   if (dbField.kind === 'relation') {
-    return getRelationVal(dbField, id, lists[dbField.list], context, info);
+    return getRelationVal(dbField, id, lists[dbField.list], context, info, errors);
   } else {
     return rootVal[fieldPath] as any;
   }
@@ -80,7 +87,8 @@ export function outputTypeField(
   access: IndividualFieldAccessControl<FieldReadAccessArgs<BaseGeneratedListTypes>>,
   listKey: string,
   fieldKey: string,
-  lists: Record<string, InitialisedList>
+  lists: Record<string, InitialisedList>,
+  errors: KeystoneErrors
 ) {
   return schema.field({
     type: output.type,
@@ -107,7 +115,7 @@ export function outputTypeField(
         // If the client handles errors correctly, it should be able to
         // receive partial data (for the fields the user has access to),
         // and then an `errors` array of AccessDeniedError's
-        throw accessDeniedError();
+        throw errors.accessDeniedError();
       }
 
       // Only static cache hints are supported at the field level until a use-case makes it clear what parameters a dynamic hint would take
@@ -115,7 +123,16 @@ export function outputTypeField(
         info.cacheControl.setCacheHint(cacheHint as any);
       }
 
-      const value = getValueForDBField(rootVal, dbField, id, fieldKey, context, lists, info);
+      const value = getValueForDBField(
+        rootVal,
+        dbField,
+        id,
+        fieldKey,
+        context,
+        lists,
+        info,
+        errors
+      );
 
       if (output.resolve) {
         return output.resolve({ value, item: rootVal }, args, context, info);

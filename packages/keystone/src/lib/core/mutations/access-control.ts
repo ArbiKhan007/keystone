@@ -4,7 +4,7 @@ import {
   validateFieldAccessControl,
   validateNonCreateListAccessControl,
 } from '../access-control';
-import { accessDeniedError } from '../graphql-errors';
+import { KeystoneErrors } from '../graphql-errors';
 import { mapUniqueWhereToWhere } from '../queries/resolvers';
 import { InitialisedList } from '../types-for-lists';
 import { runWithPrisma } from '../utils';
@@ -18,10 +18,16 @@ import {
 export async function getAccessControlledItemForDelete(
   list: InitialisedList,
   context: KeystoneContext,
+  errors: KeystoneErrors,
   uniqueInput: UniqueInputFilter,
   uniqueWhere: UniquePrismaFilter
 ): Promise<ItemRootValue> {
-  const itemId = await getStringifiedItemIdFromUniqueWhereInput(uniqueInput, list.listKey, context);
+  const itemId = await getStringifiedItemIdFromUniqueWhereInput(
+    uniqueInput,
+    list.listKey,
+    context,
+    errors
+  );
 
   // List access: pass 1
   const access = await validateNonCreateListAccessControl({
@@ -29,7 +35,7 @@ export async function getAccessControlledItemForDelete(
     args: { context, listKey: list.listKey, operation: 'delete', session: context.session, itemId },
   });
   if (access === false) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
 
   // List access: pass 2
@@ -39,7 +45,7 @@ export async function getAccessControlledItemForDelete(
   }
   const item = await runWithPrisma(context, list, model => model.findFirst({ where }));
   if (item === null) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
 
   return item;
@@ -48,11 +54,17 @@ export async function getAccessControlledItemForDelete(
 export async function getAccessControlledItemForUpdate(
   list: InitialisedList,
   context: KeystoneContext,
+  errors: KeystoneErrors,
   uniqueInput: UniqueInputFilter,
   uniqueWhere: UniquePrismaFilter,
   update: Record<string, any>
 ) {
-  const itemId = await getStringifiedItemIdFromUniqueWhereInput(uniqueInput, list.listKey, context);
+  const itemId = await getStringifiedItemIdFromUniqueWhereInput(
+    uniqueInput,
+    list.listKey,
+    context,
+    errors
+  );
   const args = {
     context,
     itemId,
@@ -68,7 +80,7 @@ export async function getAccessControlledItemForUpdate(
     args,
   });
   if (accessControl === false) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
 
   // List access: pass 2
@@ -82,7 +94,7 @@ export async function getAccessControlledItemForUpdate(
     })
   );
   if (!item) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
 
   // Field access
@@ -97,7 +109,7 @@ export async function getAccessControlledItemForUpdate(
   );
 
   if (results.some(canAccess => !canAccess)) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
 
   return item;
@@ -106,6 +118,7 @@ export async function getAccessControlledItemForUpdate(
 export async function applyAccessControlForCreate(
   list: InitialisedList,
   context: KeystoneContext,
+  { accessDeniedError }: KeystoneErrors,
   originalInput: Record<string, unknown>
 ) {
   const args = {
@@ -141,7 +154,8 @@ export async function applyAccessControlForCreate(
 async function getStringifiedItemIdFromUniqueWhereInput(
   uniqueInput: UniqueInputFilter,
   listKey: string,
-  context: KeystoneContext
+  context: KeystoneContext,
+  { accessDeniedError }: KeystoneErrors
 ): Promise<string> {
   if (uniqueInput.id !== undefined) {
     return uniqueInput.id;

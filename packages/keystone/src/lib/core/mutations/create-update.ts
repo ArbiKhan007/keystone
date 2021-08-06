@@ -9,6 +9,7 @@ import {
   runWithPrisma,
 } from '../utils';
 import { resolveUniqueWhereInput, UniqueInputFilter } from '../where-inputs';
+import { KeystoneErrors } from '../graphql-errors';
 import {
   resolveRelateToManyForCreateInput,
   resolveRelateToManyForUpdateInput,
@@ -25,15 +26,17 @@ async function createSingle(
   { data: rawData }: { data: Record<string, any> },
   list: InitialisedList,
   context: KeystoneContext,
-  writeLimit: Limit
+  writeLimit: Limit,
+  errors: KeystoneErrors
 ) {
-  await applyAccessControlForCreate(list, context, rawData);
+  await applyAccessControlForCreate(list, context, errors, rawData);
 
   const { afterChange, data } = await resolveInputForCreateOrUpdate(
     list,
     context,
     rawData,
-    undefined
+    undefined,
+    errors
   );
 
   const item = await writeLimit(() =>
@@ -46,14 +49,22 @@ async function createSingle(
 export class NestedMutationState {
   #afterChanges: (() => void | Promise<void>)[] = [];
   #context: KeystoneContext;
-  constructor(context: KeystoneContext) {
+  #errors: KeystoneErrors;
+  constructor(context: KeystoneContext, errors: KeystoneErrors) {
     this.#context = context;
+    this.#errors = errors;
   }
   async create(data: Record<string, any>, list: InitialisedList) {
     const context = this.#context;
     const writeLimit = pLimit(1);
 
-    const { item, afterChange } = await createSingle({ data }, list, context, writeLimit);
+    const { item, afterChange } = await createSingle(
+      { data },
+      list,
+      context,
+      writeLimit,
+      this.#errors
+    );
 
     this.#afterChanges.push(() => afterChange(item));
     return { id: item.id as IdType };
@@ -67,11 +78,12 @@ export class NestedMutationState {
 export async function createOne(
   createInput: { data: Record<string, any> },
   list: InitialisedList,
-  context: KeystoneContext
+  context: KeystoneContext,
+  errors: KeystoneErrors
 ) {
   const writeLimit = pLimit(1);
 
-  const { item, afterChange } = await createSingle(createInput, list, context, writeLimit);
+  const { item, afterChange } = await createSingle(createInput, list, context, writeLimit, errors);
 
   await afterChange(item);
 
@@ -82,11 +94,12 @@ export function createMany(
   createInputs: { data: Record<string, any>[] },
   list: InitialisedList,
   context: KeystoneContext,
-  provider: DatabaseProvider
+  provider: DatabaseProvider,
+  errors: KeystoneErrors
 ) {
   const writeLimit = pLimit(provider === 'sqlite' ? 1 : Infinity);
   return createInputs.data.map(async data => {
-    const { item, afterChange } = await createSingle({ data }, list, context, writeLimit);
+    const { item, afterChange } = await createSingle({ data }, list, context, writeLimit, errors);
 
     await afterChange(item);
 
@@ -98,7 +111,8 @@ async function updateSingle(
   updateInput: { where: UniqueInputFilter; data: Record<string, any> },
   list: InitialisedList,
   context: KeystoneContext,
-  writeLimit: Limit
+  writeLimit: Limit,
+  errors: KeystoneErrors
 ) {
   const { where: uniqueInput, data: rawData } = updateInput;
   // Validate and resolve the input filter
@@ -108,12 +122,19 @@ async function updateSingle(
   const item = await getAccessControlledItemForUpdate(
     list,
     context,
+    errors,
     uniqueInput,
     uniqueWhere,
     rawData
   );
 
-  const { afterChange, data } = await resolveInputForCreateOrUpdate(list, context, rawData, item);
+  const { afterChange, data } = await resolveInputForCreateOrUpdate(
+    list,
+    context,
+    rawData,
+    item,
+    errors
+  );
 
   const updatedItem = await writeLimit(() =>
     runWithPrisma(context, list, model => model.update({ where: { id: item.id }, data }))
@@ -127,20 +148,24 @@ async function updateSingle(
 export async function updateOne(
   updateInput: { where: UniqueInputFilter; data: Record<string, any> },
   list: InitialisedList,
-  context: KeystoneContext
+  context: KeystoneContext,
+  errors: KeystoneErrors
 ) {
   const writeLimit = pLimit(1);
-  return updateSingle(updateInput, list, context, writeLimit);
+  return updateSingle(updateInput, list, context, writeLimit, errors);
 }
 
 export function updateMany(
   { data }: { data: { where: UniqueInputFilter; data: Record<string, any> }[] },
   list: InitialisedList,
   context: KeystoneContext,
-  provider: DatabaseProvider
+  provider: DatabaseProvider,
+  errors: KeystoneErrors
 ) {
   const writeLimit = pLimit(provider === 'sqlite' ? 1 : Infinity);
-  return data.map(async updateInput => updateSingle(updateInput, list, context, writeLimit));
+  return data.map(async updateInput =>
+    updateSingle(updateInput, list, context, writeLimit, errors)
+  );
 }
 
 async function getResolvedData(
@@ -254,10 +279,11 @@ async function resolveInputForCreateOrUpdate(
   list: InitialisedList,
   context: KeystoneContext,
   originalInput: Record<string, any>,
-  existingItem: Record<string, any> | undefined
+  existingItem: Record<string, any> | undefined,
+  errors: KeystoneErrors
 ) {
   const operation: 'create' | 'update' = existingItem === undefined ? 'create' : 'update';
-  const nestedMutationState = new NestedMutationState(context);
+  const nestedMutationState = new NestedMutationState(context, errors);
   const { listKey } = list;
   const hookArgs = {
     context,
@@ -273,10 +299,10 @@ async function resolveInputForCreateOrUpdate(
   hookArgs.resolvedData = await getResolvedData(list, hookArgs, nestedMutationState);
 
   // Apply all validation checks
-  await validateUpdateCreate({ list, hookArgs });
+  await validateUpdateCreate({ list, errors, hookArgs });
 
   // Run beforeChange hooks
-  await runSideEffectOnlyHook(list, 'beforeChange', hookArgs);
+  await runSideEffectOnlyHook(list, 'beforeChange', hookArgs, errors);
 
   // Return the full resolved input (ready for prisma level operation),
   // and the afterChange hook to be applied
@@ -284,7 +310,12 @@ async function resolveInputForCreateOrUpdate(
     data: flattenMultiDbFields(list.fields, hookArgs.resolvedData),
     afterChange: async (updatedItem: ItemRootValue) => {
       await nestedMutationState.afterChange();
-      await runSideEffectOnlyHook(list, 'afterChange', { ...hookArgs, updatedItem, existingItem });
+      await runSideEffectOnlyHook(
+        list,
+        'afterChange',
+        { ...hookArgs, updatedItem, existingItem },
+        errors
+      );
     },
   };
 }

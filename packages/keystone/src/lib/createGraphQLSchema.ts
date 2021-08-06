@@ -4,14 +4,16 @@ import { sessionSchema } from '../session';
 import { InitialisedList } from './core/types-for-lists';
 import { getGraphQLSchema } from './core/graphql-schema';
 import { getDBProvider } from './createSystem';
+import { KeystoneErrors } from './core/graphql-errors';
 
 export function createGraphQLSchema(
   config: KeystoneConfig,
   lists: Record<string, InitialisedList>,
+  errors: KeystoneErrors,
   adminMeta: AdminMetaRootVal
 ) {
   // Start with the core keystone graphQL schema
-  let graphQLSchema = getGraphQLSchema(lists, getDBProvider(config.db));
+  let graphQLSchema = getGraphQLSchema(lists, errors, getDBProvider(config.db));
 
   // Merge in the user defined graphQL API
   if (config.extendGraphqlSchema) {

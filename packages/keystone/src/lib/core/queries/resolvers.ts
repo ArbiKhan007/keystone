@@ -13,9 +13,9 @@ import {
   resolveWhereInput,
   UniqueInputFilter,
 } from '../where-inputs';
-import { accessDeniedError, limitsExceededError } from '../graphql-errors';
 import { InitialisedList } from '../types-for-lists';
 import { getDBFieldKeyForFieldOnMultiField, runWithPrisma } from '../utils';
+import { KeystoneErrors } from '../graphql-errors';
 
 // doing this is a result of an optimisation to skip doing a findUnique and then a findFirst(where the second one is done with access control)
 // we want to do this explicit mapping because:
@@ -46,7 +46,8 @@ export function mapUniqueWhereToWhere(
 export async function accessControlledFilter(
   list: InitialisedList,
   context: KeystoneContext,
-  resolvedWhere: PrismaFilter
+  resolvedWhere: PrismaFilter,
+  { accessDeniedError }: KeystoneErrors
 ) {
   // Run access control
   const access = await validateNonCreateListAccessControl({
@@ -68,19 +69,20 @@ export async function accessControlledFilter(
 export async function findOne(
   args: { where: UniqueInputFilter },
   list: InitialisedList,
-  context: KeystoneContext
+  context: KeystoneContext,
+  errors: KeystoneErrors
 ) {
   // Validate and resolve the input filter
   const uniqueWhere = await resolveUniqueWhereInput(args.where, list.fields, context);
   const resolvedWhere = mapUniqueWhereToWhere(list, uniqueWhere);
 
   // Apply access control
-  const filter = await accessControlledFilter(list, context, resolvedWhere);
+  const filter = await accessControlledFilter(list, context, resolvedWhere, errors);
 
   const item = await runWithPrisma(context, list, model => model.findFirst({ where: filter }));
 
   if (item === null) {
-    throw accessDeniedError();
+    throw errors.accessDeniedError();
   }
   return item;
 }
@@ -90,14 +92,15 @@ export async function findMany(
   list: InitialisedList,
   context: KeystoneContext,
   info: GraphQLResolveInfo,
+  errors: KeystoneErrors,
   extraFilter?: PrismaFilter
 ): Promise<ItemRootValue[]> {
   const orderBy = await resolveOrderBy(rawOrderBy, list, context);
 
-  applyEarlyMaxResults(take, list);
+  applyEarlyMaxResults(take, list, errors);
 
   let resolvedWhere = await resolveWhereInput(where || {}, list);
-  resolvedWhere = await accessControlledFilter(list, context, resolvedWhere);
+  resolvedWhere = await accessControlledFilter(list, context, resolvedWhere, errors);
 
   const results = await runWithPrisma(context, list, model =>
     model.findMany({
@@ -108,7 +111,7 @@ export async function findMany(
     })
   );
 
-  applyMaxResults(results, list, context);
+  applyMaxResults(results, list, context, errors);
 
   if (info.cacheControl && list.cacheHint) {
     info.cacheControl.setCacheHint(
@@ -164,10 +167,11 @@ export async function count(
   list: InitialisedList,
   context: KeystoneContext,
   info: GraphQLResolveInfo,
+  errors: KeystoneErrors,
   extraFilter?: PrismaFilter
 ) {
   let resolvedWhere = await resolveWhereInput(where || {}, list);
-  resolvedWhere = await accessControlledFilter(list, context, resolvedWhere);
+  resolvedWhere = await accessControlledFilter(list, context, resolvedWhere, errors);
 
   const count = await runWithPrisma(context, list, model =>
     model.count({
@@ -186,7 +190,11 @@ export async function count(
   return count;
 }
 
-function applyEarlyMaxResults(_take: number | null | undefined, list: InitialisedList) {
+function applyEarlyMaxResults(
+  _take: number | null | undefined,
+  list: InitialisedList,
+  { limitsExceededError }: KeystoneErrors
+) {
   const take = _take ?? Infinity;
   // We want to help devs by failing fast and noisily if limits are violated.
   // Unfortunately, we can't always be sure of intent.
@@ -200,7 +208,12 @@ function applyEarlyMaxResults(_take: number | null | undefined, list: Initialise
   }
 }
 
-function applyMaxResults(results: unknown[], list: InitialisedList, context: KeystoneContext) {
+function applyMaxResults(
+  results: unknown[],
+  list: InitialisedList,
+  context: KeystoneContext,
+  { limitsExceededError }: KeystoneErrors
+) {
   if (results.length > list.maxResults) {
     throw limitsExceededError({ list: list.listKey, type: 'maxResults', limit: list.maxResults });
   }

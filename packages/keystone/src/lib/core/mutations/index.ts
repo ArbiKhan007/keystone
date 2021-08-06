@@ -1,4 +1,5 @@
 import { DatabaseProvider, getGqlNames, schema } from '@keystone-next/types';
+import { KeystoneErrors } from '../graphql-errors';
 import { InitialisedList } from '../types-for-lists';
 import * as createAndUpdate from './create-update';
 import * as deletes from './delete';
@@ -19,14 +20,18 @@ function promisesButSettledWhenAllSettledAndInOrder<T extends Promise<unknown>[]
   }) as T;
 }
 
-export function getMutationsForList(list: InitialisedList, provider: DatabaseProvider) {
+export function getMutationsForList(
+  list: InitialisedList,
+  errors: KeystoneErrors,
+  provider: DatabaseProvider
+) {
   const names = getGqlNames(list);
 
   const createOne = schema.field({
     type: list.types.output,
     args: { data: schema.arg({ type: schema.nonNull(list.types.create) }) },
     resolve(_rootVal, { data }, context) {
-      return createAndUpdate.createOne({ data }, list, context);
+      return createAndUpdate.createOne({ data }, list, context, errors);
     },
   });
 
@@ -37,7 +42,7 @@ export function getMutationsForList(list: InitialisedList, provider: DatabasePro
     },
     resolve(_rootVal, args, context) {
       return promisesButSettledWhenAllSettledAndInOrder(
-        createAndUpdate.createMany(args, list, context, provider)
+        createAndUpdate.createMany(args, list, context, provider, errors)
       );
     },
   });
@@ -49,7 +54,7 @@ export function getMutationsForList(list: InitialisedList, provider: DatabasePro
       data: schema.arg({ type: schema.nonNull(list.types.update) }),
     },
     resolve(_rootVal, args, context) {
-      return createAndUpdate.updateOne(args, list, context);
+      return createAndUpdate.updateOne(args, list, context, errors);
     },
   });
 
@@ -67,7 +72,7 @@ export function getMutationsForList(list: InitialisedList, provider: DatabasePro
     },
     resolve(_rootVal, args, context) {
       return promisesButSettledWhenAllSettledAndInOrder(
-        createAndUpdate.updateMany(args, list, context, provider)
+        createAndUpdate.updateMany(args, list, context, provider, errors)
       );
     },
   });
@@ -76,7 +81,7 @@ export function getMutationsForList(list: InitialisedList, provider: DatabasePro
     type: list.types.output,
     args: { where: schema.arg({ type: schema.nonNull(list.types.uniqueWhere) }) },
     resolve(rootVal, { where }, context) {
-      return deletes.deleteOne(where, list, context);
+      return deletes.deleteOne(where, list, context, errors);
     },
   });
 
@@ -89,7 +94,7 @@ export function getMutationsForList(list: InitialisedList, provider: DatabasePro
     },
     resolve(rootVal, { where }, context) {
       return promisesButSettledWhenAllSettledAndInOrder(
-        deletes.deleteMany(where, list, context, provider)
+        deletes.deleteMany(where, list, context, provider, errors)
       );
     },
   });

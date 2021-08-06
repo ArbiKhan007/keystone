@@ -10,6 +10,7 @@ import { ExitError } from './scripts/utils';
 import { initialiseLists } from './lib/core/types-for-lists';
 import { printPrismaSchema } from './lib/core/prisma-schema';
 import { getDBProvider } from './lib/createSystem';
+import { graphQlErrors } from './lib/core/graphql-errors';
 
 export function getSchemaPaths(cwd: string) {
   return {
@@ -27,7 +28,8 @@ export async function getCommittedArtifacts(
   graphQLSchema: GraphQLSchema,
   config: KeystoneConfig
 ): Promise<CommittedArtifacts> {
-  const lists = initialiseLists(config.lists, getDBProvider(config.db));
+  const errors = graphQlErrors(config.graphql?.debug);
+  const lists = initialiseLists(config.lists, errors, getDBProvider(config.db));
   const prismaSchema = printPrismaSchema(
     lists,
     getDBProvider(config.db),
@@ -175,7 +177,11 @@ export async function generateNodeModulesArtifacts(
   config: KeystoneConfig,
   cwd: string
 ) {
-  const lists = initialiseLists(config.lists, getDBProvider(config.db));
+  const lists = initialiseLists(
+    config.lists,
+    graphQlErrors(config.graphql?.debug),
+    getDBProvider(config.db)
+  );
 
   const printedSchema = printSchema(graphQLSchema);
   const dotKeystoneDir = path.join(cwd, 'node_modules/.keystone');

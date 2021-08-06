@@ -89,23 +89,33 @@ export const expectValidationError = (
 export const expectExtensionError = (
   mode: 'dev' | 'production',
   httpQuery: boolean,
+  _debug: boolean | undefined,
   errors: readonly any[] | undefined,
   extensionName: string,
-  args: { path: (string | number)[]; messages: string[]; errors: any[] }[]
+  args: { path: (string | number)[]; messages: string[]; debug: any[] }[]
 ) => {
   const unpackedErrors = unpackErrors(errors);
   expect(unpackedErrors).toEqual(
-    args.map(({ path, messages, errors }) => {
+    args.map(({ path, messages, debug }) => {
       const message = `An error occured while running "${extensionName}".\n${j(messages)}`;
       const stacktrace = message.split('\n');
       stacktrace[0] = `Error: ${stacktrace[0]}`;
+
+      // We expect to see error details if:
+      //   - graphql.debug is true or
+      //   - graphql.debug is undefined and mode !== production
+      const expectErrors = _debug === true || (_debug === undefined && mode !== 'production');
+      // We expect to see the Apollo exception under the same conditions, but only if
+      // httpQuery is also true.
+      const expectException = httpQuery && expectErrors;
+
       return {
         extensions: {
           code: 'INTERNAL_SERVER_ERROR',
-          ...(httpQuery && mode !== 'production'
-            ? { exception: { errors, stacktrace: expect.arrayContaining(stacktrace) } }
+          ...(expectException
+            ? { exception: { debug, stacktrace: expect.arrayContaining(stacktrace) } }
             : {}),
-          ...(mode !== 'production' ? { errors } : {}),
+          ...(expectErrors ? { debug } : {}),
         },
         path,
         message,

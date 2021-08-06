@@ -1,9 +1,10 @@
-import { validationFailureError } from '../graphql-errors';
+import { KeystoneErrors } from '../graphql-errors';
 import { InitialisedList } from '../types-for-lists';
 
 type AddValidationError = (msg: string) => void;
 
 async function validationHook(
+  { validationFailureError }: KeystoneErrors,
   _validationHook: (addValidationError: AddValidationError) => void | Promise<void>
 ) {
   const messages: string[] = [];
@@ -22,13 +23,15 @@ type UpdateCreateHookArgs = Parameters<
 >[0];
 export async function validateUpdateCreate({
   list,
+  errors,
   hookArgs,
 }: {
   list: InitialisedList;
+  errors: KeystoneErrors;
   hookArgs: Omit<UpdateCreateHookArgs, 'addValidationError'>;
 }) {
   const { operation, resolvedData } = hookArgs;
-  await validationHook(async _addValidationError => {
+  await validationHook(errors, async _addValidationError => {
     // Check isRequired
     for (const [fieldKey, field] of Object.entries(list.fields)) {
       const addValidationError = (msg: string) =>
@@ -69,12 +72,14 @@ export async function validateUpdateCreate({
 type DeleteHookArgs = Parameters<Exclude<InitialisedList['hooks']['validateDelete'], undefined>>[0];
 export async function validateDelete({
   list,
+  errors,
   hookArgs,
 }: {
   list: InitialisedList;
+  errors: KeystoneErrors;
   hookArgs: Omit<DeleteHookArgs, 'addValidationError'>;
 }) {
-  await validationHook(async _addValidationError => {
+  await validationHook(errors, async _addValidationError => {
     // Field validation
     for (const [fieldPath, field] of Object.entries(list.fields)) {
       const addValidationError = (msg: string) =>

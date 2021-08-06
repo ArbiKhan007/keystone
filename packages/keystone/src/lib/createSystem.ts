@@ -4,6 +4,7 @@ import { createAdminMeta } from '../admin-ui/system/createAdminMeta';
 import { createGraphQLSchema } from './createGraphQLSchema';
 import { makeCreateContext } from './context/createContext';
 import { initialiseLists } from './core/types-for-lists';
+import { graphQlErrors, KeystoneErrors } from './core/graphql-errors';
 
 export function getDBProvider(db: KeystoneConfig['db']): DatabaseProvider {
   if (db.adapter === 'prisma_postgresql' || db.provider === 'postgresql') {
@@ -17,7 +18,11 @@ export function getDBProvider(db: KeystoneConfig['db']): DatabaseProvider {
   }
 }
 
-function getInternalGraphQLSchema(config: KeystoneConfig, provider: DatabaseProvider) {
+function getInternalGraphQLSchema(
+  config: KeystoneConfig,
+  errors: KeystoneErrors,
+  provider: DatabaseProvider
+) {
   const transformedConfig: KeystoneConfig = {
     ...config,
     lists: Object.fromEntries(
@@ -42,20 +47,23 @@ function getInternalGraphQLSchema(config: KeystoneConfig, provider: DatabaseProv
       })
     ),
   };
-  const lists = initialiseLists(transformedConfig.lists, provider);
+  const lists = initialiseLists(transformedConfig.lists, errors, provider);
   const adminMeta = createAdminMeta(transformedConfig, lists);
-  return createGraphQLSchema(transformedConfig, lists, adminMeta);
+  return createGraphQLSchema(transformedConfig, lists, errors, adminMeta);
 }
 
 export function createSystem(config: KeystoneConfig) {
   const provider = getDBProvider(config.db);
-  const lists = initialiseLists(config.lists, provider);
+
+  const errors = graphQlErrors(config.graphql?.debug);
+
+  const lists = initialiseLists(config.lists, errors, provider);
 
   const adminMeta = createAdminMeta(config, lists);
 
-  const graphQLSchema = createGraphQLSchema(config, lists, adminMeta);
+  const graphQLSchema = createGraphQLSchema(config, lists, errors, adminMeta);
 
-  const internalGraphQLSchema = getInternalGraphQLSchema(config, provider);
+  const internalGraphQLSchema = getInternalGraphQLSchema(config, errors, provider);
 
   return {
     graphQLSchema,

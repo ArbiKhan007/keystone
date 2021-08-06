@@ -25,6 +25,7 @@ import { ResolvedDBField, resolveRelationships } from './resolve-relationships';
 import { InputFilter, PrismaFilter, resolveWhereInput } from './where-inputs';
 import { outputTypeField } from './queries/output-field';
 import { assertFieldsValid } from './field-assertions';
+import { KeystoneErrors } from './graphql-errors';
 
 export type InitialisedField = Omit<NextFieldType, 'dbField' | 'access'> & {
   dbField: ResolvedDBField;
@@ -50,6 +51,7 @@ export type InitialisedList = {
 
 export function initialiseLists(
   listsConfig: KeystoneConfig['lists'],
+  errors: KeystoneErrors,
   provider: DatabaseProvider
 ): Record<string, InitialisedList> {
   const listInfos: Record<string, ListInfo> = {};
@@ -80,7 +82,8 @@ export function initialiseLists(
                     field.access.read,
                     listKey,
                     fieldPath,
-                    lists
+                    lists,
+                    errors
                   ),
                 ];
               });

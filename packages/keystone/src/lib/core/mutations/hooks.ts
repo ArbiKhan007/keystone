@@ -1,4 +1,4 @@
-import { extensionError } from '../graphql-errors';
+import { KeystoneErrors } from '../graphql-errors';
 
 export async function runSideEffectOnlyHook<
   HookName extends string,
@@ -17,7 +17,7 @@ export async function runSideEffectOnlyHook<
     listKey: string;
   },
   Args extends Parameters<NonNullable<List['hooks'][HookName]>>[0]
->(list: List, hookName: HookName, args: Args) {
+>(list: List, hookName: HookName, args: Args, { extensionError }: KeystoneErrors) {
   // Runs the before/after change/delete hooks
 
   // Only run field hooks on change operations if the field
